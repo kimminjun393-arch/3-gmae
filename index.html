@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>2인용 핑퐁 대결</title>
+    <style>
+        body { background-color: #222; color: white; text-align: center; font-family: sans-serif; }
+        canvas { border: 5px solid #fff; background-color: #000; display: block; margin: 20px auto; }
+        .controls { display: flex; justify-content: center; gap: 50px; font-size: 0.9em; color: #aaa; }
+    </style>
+</head>
+<body>
+    <h1>Pong Battle</h1>
+    <canvas id="pong" width="800" height="400"></canvas>
+    <div class="controls">
+        <p>왼쪽 플레이어: W (위) / S (아래)</p>
+        <p>오른쪽 플레이어: ↑ (위) / ↓ (아래)</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("pong");
+        const ctx = canvas.getContext("2d");
+
+        // 게임 객체 설정
+        const ball = { x: canvas.width/2, y: canvas.height/2, radius: 10, speed: 5, dx: 5, dy: 5, color: "WHITE" };
+        const paddleWidth = 10, paddleHeight = 100;
+        const leftPlayer = { x: 0, y: canvas.height/2 - 50, width: paddleWidth, height: paddleHeight, score: 0, color: "CYAN" };
+        const rightPlayer = { x: canvas.width - 10, y: canvas.height/2 - 50, width: paddleWidth, height: paddleHeight, score: 0, color: "MAGENTA" };
+
+        // 키 입력 상태
+        const keys = {};
+        window.addEventListener("keydown", e => keys[e.key] = true);
+        window.addEventListener("keyup", e => keys[e.key] = false);
+
+        function drawRect(x, y, w, h, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, w, h);
+        }
+
+        function drawCircle(x, y, r, color) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI*2, false);
+            ctx.fill();
+        }
+
+        function drawText(text, x, y) {
+            ctx.fillStyle = "#FFF";
+            ctx.font = "45px Arial";
+            ctx.fillText(text, x, y);
+        }
+
+        function resetBall() {
+            ball.x = canvas.width/2;
+            ball.y = canvas.height/2;
+            ball.dx = -ball.dx; // 실점한 쪽으로 공 발사
+            ball.speed = 5;
+        }
+
+        function update() {
+            // 패들 이동 (왼쪽: W/S, 오른쪽: 화살표 위/아래)
+            if (keys['w'] && leftPlayer.y > 0) leftPlayer.y -= 7;
+            if (keys['s'] && leftPlayer.y < canvas.height - leftPlayer.height) leftPlayer.y += 7;
+            if (keys['ArrowUp'] && rightPlayer.y > 0) rightPlayer.y -= 7;
+            if (keys['ArrowDown'] && rightPlayer.y < canvas.height - rightPlayer.height) rightPlayer.y += 7;
+
+            // 공 이동
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+
+            // 벽 충돌 (상하)
+            if (ball.y - ball.radius < 0 || ball.y + ball.radius > canvas.height) ball.dy = -ball.dy;
+
+            // 패들 충돌 감지
+            let player = (ball.x < canvas.width/2) ? leftPlayer : rightPlayer;
+            if (collision(ball, player)) {
+                // 공이 패들의 어디에 맞았는지 계산 (반사 각도 조절)
+                let collidePoint = (ball.y - (player.y + player.height/2)) / (player.height/2);
+                let angleRad = (Math.PI/4) * collidePoint;
+                let direction = (ball.x < canvas.width/2) ? 1 : -1;
+                
+                ball.dx = direction * ball.speed * Math.cos(angleRad);
+                ball.dy = ball.speed * Math.sin(angleRad);
+                ball.speed += 0.2; // 칠 때마다 속도 증가
+            }
+
+            // 점수 계산
+            if (ball.x - ball.radius < 0) {
+                rightPlayer.score++;
+                resetBall();
+            } else if (ball.x + ball.radius > canvas.width) {
+                leftPlayer.score++;
+                resetBall();
+            }
+        }
+
+        function collision(b, p) {
+            return b.x + b.radius > p.x && b.x - b.radius < p.x + p.width &&
+                   b.y + b.radius > p.y && b.y - b.radius < p.y + p.height;
+        }
+
+        function render() {
+            drawRect(0, 0, canvas.width, canvas.height, "#000"); // 배경
+            drawText(leftPlayer.score, canvas.width/4, canvas.height/5);
+            drawText(rightPlayer.score, 3*canvas.width/4, canvas.height/5);
+            drawRect(leftPlayer.x, leftPlayer.y, leftPlayer.width, leftPlayer.height, leftPlayer.color);
+            drawRect(rightPlayer.x, rightPlayer.y, rightPlayer.width, rightPlayer.height, rightPlayer.color);
+            drawCircle(ball.x, ball.y, ball.radius, ball.color);
+            
+            // 중앙선
+            for(let i=0; i<=canvas.height; i+=15) drawRect(canvas.width/2-1, i, 2, 10, "#555");
+        }
+
+        function game() {
+            update();
+            render();
+        }
+
+        setInterval(game, 1000/60); // 60 FPS
+    </script>
+</body>
+</html>
