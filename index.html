@@ -1,1 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>온라인 틱택토 대결</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; text-align: center; background: #2c3e50; color: white; margin-top: 50px; }
+        .controls { margin-bottom: 20px; }
+        input { padding: 10px; font-size: 16px; border-radius: 5px; border: none; outline: none; margin-bottom: 10px; text-align: center; }
+        button { padding: 10px 15px; font-size: 16px; cursor: pointer; border-radius: 5px; border: none; color: white; font-weight: bold; margin: 0 5px; }
+        .btn-o { background: #3498db; }
+        .btn-x { background: #e74c3c; }
+        .btn-reset { background: #95a5a6; }
+        
+        .board { display: grid; grid-template-columns: repeat(3, 100px); gap: 10px; justify-content: center; margin-top: 20px; pointer-events: none; opacity: 0.3; }
+        .cell { width: 100px; height: 100px; background: #34495e; font-size: 60px; line-height: 100px; cursor: pointer; border-radius: 10px; user-select: none; transition: background 0.2s; }
+        .cell:hover { background: #3b536b; }
+        .cell.O { color: #3498db; }
+        .cell.X { color: #e74c3c; }
+        
+        #status { margin-top: 20px; font-size: 22px; color: #f1c40f; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>⭕ 실시간 틱택토 ❌</h1>
+    
+    <div class="controls">
+        <input type="text" id="roomInput" placeholder="방 이름 (예: apple123)"><br>
+        <button class="btn-o" onclick="joinGame('O')">방 만들기 (O)</button>
+        <button class="btn-x" onclick="joinGame('X')">방 접속하기 (X)</button>
+    </div>
 
+    <div id="status">방 이름을 정하고 역할을 선택하세요.</div>
+
+    <div class="board" id="board">
+        <div class="cell" onclick="makeMove(0)"></div>
+        <div class="cell" onclick="makeMove(1)"></div>
+        <div class="cell" onclick="makeMove(2)"></div>
+        <div class="cell" onclick="makeMove(3)"></div>
+        <div class="cell" onclick="makeMove(4)"></div>
+        <div class="cell" onclick="makeMove(5)"></div>
+        <div class="cell" onclick="makeMove(6)"></div>
+        <div class="cell" onclick="makeMove(7)"></div>
+        <div class="cell" onclick="makeMove(8)"></div>
+    </div>
+
+    <div style="margin-top: 30px;">
+        <button class="btn-reset" onclick="resetGame()" style="display:none;" id="resetBtn">게임 다시하기</button>
+    </div>
+
+    <script>
+        let client;
+        let myRoom = "";
+        let mySymbol = "";
+        let currentTurn = "O"; // 항상 O가 먼저 시작
+        let boardState = ["", "", "", "", "", "", "", "", ""];
+        
+        const statusEl = document.getElementById("status");
+        const boardEl = document.getElementById("board");
+        const resetBtn = document.getElementById("resetBtn");
+        const cells = document.querySelectorAll(".cell");
+
+        function joinGame(symbol) {
+            const roomName = document.getElementById("roomInput").value.trim();
+            if (!roomName) return alert("방 이름을 먼저 입력하세요!");
+            
+            mySymbol = symbol;
+            myRoom = "github-game-tutorial/room/" + roomName;
+            statusEl.innerText = "서버 연결 중...";
+
+            // 무료 공용 MQTT 서버 접속
+            client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+
+            client.on('connect', () => {
+                client.subscribe(myRoom);
+                statusEl.innerText = `[${mySymbol}] 접속 완료! O부터 시작합니다.`;
+                boardEl.style.pointerEvents = "auto";
+                boardEl.style.opacity = "1";
+                resetBtn.style.display = "inline-block";
+                updateBoardUI();
+            });
+
+            client.on('message', (topic, message) => {
+                const data = JSON.parse(message.toString());
+
+                if (data.type === "move") {
+                    boardState[data.index] = data.symbol;
+                    currentTurn = data.symbol === "O" ? "X" : "O";
+                    updateBoardUI();
+                    checkWin();
+                } else if (data.type === "reset") {
+                    boardState = ["", "", "", "", "", "", "", "", ""];
+                    currentTurn = "O";
+                    updateBoardUI();
+                    statusEl.innerText = "게임이 초기화되었습니다. O부터 시작하세요!";
+                }
+            });
+        }
+
+        function makeMove(index) {
+            // 빈칸이 아니거나 내 턴이 아니면 무시
+            if (boardState[index] !== "" || currentTurn !== mySymbol) return;
+            
+            // 내 움직임을 서버(같은 방)로 전송
+            client.publish(myRoom, JSON.stringify({ type: "move", index: index, symbol: mySymbol }));
+        }
+
+        function resetGame() {
+            client.publish(myRoom, JSON.stringify({ type: "reset" }));
+        }
+
+        function updateBoardUI() {
+            cells.forEach((cell, index) => {
+                cell.innerText = boardState[index];
+                cell.className = "cell " + boardState[index]; // 색상 변경용 클래스 추가
+            });
+            
+            if (currentTurn === mySymbol) {
+                statusEl.innerText = "👉 당신의 차례입니다!";
+            } else {
+                statusEl.innerText = "⏳ 상대방을 기다리는 중...";
+            }
+        }
+
+        function checkWin() {
+            const winPatterns = [
+                [0,1,2], [3,4,5], [6,7,8], // 가로
+                [0,3,6], [1,4,7], [2,5,8], // 세로
+                [0,4,8], [2,4,6] // 대각선
+            ];
+
+            for (let p of winPatterns) {
+                const [a, b, c] = p;
+                if (boardState[a] && boardState[a] === boardState[b] && boardState[a] === boardState[c]) {
+                    statusEl.innerText = boardState[a] === mySymbol ? "🎉 승리했습니다!" : "💀 패배했습니다...";
+                    currentTurn = ""; // 게임 멈춤
+                    return;
+                }
+            }
+
+            if (!boardState.includes("")) {
+                statusEl.innerText = "🤝 무승부입니다!";
+                currentTurn = "";
+            }
+        }
+    </script>
+</body>
+</html>
