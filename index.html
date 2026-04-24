@@ -1,122 +1,107 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>2인용 핑퐁 대결</title>
+    <title>P2P 실시간 온라인 핑퐁</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        body { background-color: #222; color: white; text-align: center; font-family: sans-serif; }
-        canvas { border: 5px solid #fff; background-color: #000; display: block; margin: 20px auto; }
-        .controls { display: flex; justify-content: center; gap: 50px; font-size: 0.9em; color: #aaa; }
+        body { background: #222; color: #fff; text-align: center; font-family: sans-serif; }
+        canvas { background: #000; border: 3px solid #fff; }
+        .ui { margin: 10px; }
     </style>
 </head>
 <body>
-    <h1>Pong Battle</h1>
-    <canvas id="pong" width="800" height="400"></canvas>
-    <div class="controls">
-        <p>왼쪽 플레이어: W (위) / S (아래)</p>
-        <p>오른쪽 플레이어: ↑ (위) / ↓ (아래)</p>
+    <h1>Online Pong (P2P)</h1>
+    <div class="ui">
+        <p>내 ID: <span id="my-id" style="color: yellow;">연결 중...</span></p>
+        <input type="text" id="peer-id" placeholder="상대방 ID 입력">
+        <button onclick="connectToPeer()">연결하기</button>
     </div>
+    <canvas id="pong" width="600" height="400"></canvas>
 
     <script>
         const canvas = document.getElementById("pong");
         const ctx = canvas.getContext("2d");
+        let peer, conn;
+        let isHost = false;
 
-        // 게임 객체 설정
-        const ball = { x: canvas.width/2, y: canvas.height/2, radius: 10, speed: 5, dx: 5, dy: 5, color: "WHITE" };
-        const paddleWidth = 10, paddleHeight = 100;
-        const leftPlayer = { x: 0, y: canvas.height/2 - 50, width: paddleWidth, height: paddleHeight, score: 0, color: "CYAN" };
-        const rightPlayer = { x: canvas.width - 10, y: canvas.height/2 - 50, width: paddleWidth, height: paddleHeight, score: 0, color: "MAGENTA" };
+        // 게임 상태
+        const p1 = { y: 150, score: 0 };
+        const p2 = { y: 150, score: 0 };
+        const ball = { x: 300, y: 200, dx: 4, dy: 4 };
 
-        // 키 입력 상태
-        const keys = {};
-        window.addEventListener("keydown", e => keys[e.key] = true);
-        window.addEventListener("keyup", e => keys[e.key] = false);
+        // 1. Peer 초기화
+        peer = new Peer();
+        peer.on('open', id => { document.getElementById('my-id').innerText = id; });
 
-        function drawRect(x, y, w, h, color) {
-            ctx.fillStyle = color;
-            ctx.fillRect(x, y, w, h);
+        // 2. 누군가 나에게 연결했을 때 (Host가 됨)
+        peer.on('connection', c => {
+            conn = c;
+            isHost = true;
+            setupConnection();
+        });
+
+        // 3. 내가 남에게 연결할 때 (Guest가 됨)
+        function connectToPeer() {
+            const peerId = document.getElementById('peer-id').value;
+            conn = peer.connect(peerId);
+            isHost = false;
+            setupConnection();
         }
 
-        function drawCircle(x, y, r, color) {
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, Math.PI*2, false);
-            ctx.fill();
+        function setupConnection() {
+            conn.on('data', data => {
+                if (isHost) {
+                    p2.y = data.y; // 호스트는 게스트의 패들 위치를 받음
+                } else {
+                    // 게스트는 호스트로부터 전체 게임 상태를 받음
+                    p1.y = data.p1y;
+                    p2.y = data.p2y;
+                    ball.x = data.bx;
+                    ball.y = data.by;
+                    p1.score = data.s1;
+                    p2.score = data.s2;
+                }
+            });
+            gameLoop();
         }
 
-        function drawText(text, x, y) {
-            ctx.fillStyle = "#FFF";
-            ctx.font = "45px Arial";
-            ctx.fillText(text, x, y);
-        }
-
-        function resetBall() {
-            ball.x = canvas.width/2;
-            ball.y = canvas.height/2;
-            ball.dx = -ball.dx; // 실점한 쪽으로 공 발사
-            ball.speed = 5;
-        }
+        // 입력 감지
+        let myY = 150;
+        window.onmousemove = e => {
+            const rect = canvas.getBoundingClientRect();
+            myY = e.clientY - rect.top - 50;
+        };
 
         function update() {
-            // 패들 이동 (왼쪽: W/S, 오른쪽: 화살표 위/아래)
-            if (keys['w'] && leftPlayer.y > 0) leftPlayer.y -= 7;
-            if (keys['s'] && leftPlayer.y < canvas.height - leftPlayer.height) leftPlayer.y += 7;
-            if (keys['ArrowUp'] && rightPlayer.y > 0) rightPlayer.y -= 7;
-            if (keys['ArrowDown'] && rightPlayer.y < canvas.height - rightPlayer.height) rightPlayer.y += 7;
-
-            // 공 이동
-            ball.x += ball.dx;
-            ball.y += ball.dy;
-
-            // 벽 충돌 (상하)
-            if (ball.y - ball.radius < 0 || ball.y + ball.radius > canvas.height) ball.dy = -ball.dy;
-
-            // 패들 충돌 감지
-            let player = (ball.x < canvas.width/2) ? leftPlayer : rightPlayer;
-            if (collision(ball, player)) {
-                // 공이 패들의 어디에 맞았는지 계산 (반사 각도 조절)
-                let collidePoint = (ball.y - (player.y + player.height/2)) / (player.height/2);
-                let angleRad = (Math.PI/4) * collidePoint;
-                let direction = (ball.x < canvas.width/2) ? 1 : -1;
+            if (isHost) {
+                p1.y = myY;
+                // 공 로직 (호스트만 계산하여 동기화)
+                ball.x += ball.dx; ball.y += ball.dy;
+                if (ball.y < 0 || ball.y > 400) ball.dy *= -1;
+                if (ball.x < 10 && ball.y > p1.y && ball.y < p1.y + 100) ball.dx *= -1;
+                if (ball.x > 590 && ball.y > p2.y && ball.y < p2.y + 100) ball.dx *= -1;
                 
-                ball.dx = direction * ball.speed * Math.cos(angleRad);
-                ball.dy = ball.speed * Math.sin(angleRad);
-                ball.speed += 0.2; // 칠 때마다 속도 증가
-            }
-
-            // 점수 계산
-            if (ball.x - ball.radius < 0) {
-                rightPlayer.score++;
-                resetBall();
-            } else if (ball.x + ball.radius > canvas.width) {
-                leftPlayer.score++;
-                resetBall();
+                // 데이터 전송 (호스트 -> 게스트)
+                conn.send({ p1y: p1.y, p2y: p2.y, bx: ball.x, by: ball.y, s1: p1.score, s2: p2.score });
+            } else {
+                p2.y = myY;
+                // 데이터 전송 (게스트 -> 호스트)
+                conn.send({ y: p2.y });
             }
         }
 
-        function collision(b, p) {
-            return b.x + b.radius > p.x && b.x - b.radius < p.x + p.width &&
-                   b.y + b.radius > p.y && b.y - b.radius < p.y + p.height;
+        function draw() {
+            ctx.clearRect(0, 0, 600, 400);
+            ctx.fillRect(0, p1.y, 10, 100); // P1 패들
+            ctx.fillRect(590, p2.y, 10, 100); // P2 패들
+            ctx.beginPath(); ctx.arc(ball.x, ball.y, 8, 0, Math.PI*2); ctx.fill(); // 공
         }
 
-        function render() {
-            drawRect(0, 0, canvas.width, canvas.height, "#000"); // 배경
-            drawText(leftPlayer.score, canvas.width/4, canvas.height/5);
-            drawText(rightPlayer.score, 3*canvas.width/4, canvas.height/5);
-            drawRect(leftPlayer.x, leftPlayer.y, leftPlayer.width, leftPlayer.height, leftPlayer.color);
-            drawRect(rightPlayer.x, rightPlayer.y, rightPlayer.width, rightPlayer.height, rightPlayer.color);
-            drawCircle(ball.x, ball.y, ball.radius, ball.color);
-            
-            // 중앙선
-            for(let i=0; i<=canvas.height; i+=15) drawRect(canvas.width/2-1, i, 2, 10, "#555");
-        }
-
-        function game() {
+        function gameLoop() {
             update();
-            render();
+            draw();
+            requestAnimationFrame(gameLoop);
         }
-
-        setInterval(game, 1000/60); // 60 FPS
     </script>
 </body>
 </html>
